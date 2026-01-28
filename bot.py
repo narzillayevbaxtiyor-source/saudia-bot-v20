@@ -1,77 +1,89 @@
 import os
-import logging
 from telegram import Update
-from telegram.ext import (
-    Application,
-    MessageHandler,
-    CommandHandler,
-    ContextTypes,
-    filters
-)
+from telegram.ext import Application, MessageHandler, ContextTypes, filters
 
-# ================== CONFIG ==================
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 ALLOWED_CHAT_ID = int(os.getenv("ALLOWED_CHAT_ID", "0"))
 
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN topilmadi. Railway Variables ga BOT_TOKEN qo‘ying.")
+
+# ===== TOPIC ID LAR =====
 TOPICS = {
-    "uy": 5,
-    "ijara": 5,
-    "ish": 6,
-    "daromad": 6,
-    "taksi": 7,
-    "transport": 7,
-    "visa": 8,
-    "hujjat": 8,
-    "bozor": 9,
-    "narx": 9,
-    "umra": 10,
-    "ziyorat": 10,
-    "salomat": 11,
-    "shifokor": 11,
+    "Uy-joy & Ijara": {
+        "id": 5,
+        "keywords": ["uy", "ijara", "kvartira", "xonadosh", "room"]
+    },
+    "Ish & Daromad": {
+        "id": 6,
+        "keywords": ["ish", "job", "work", "daromad", "kuryer"]
+    },
+    "Transport & Taksi": {
+        "id": 7,
+        "keywords": ["taksi", "uber", "careem", "transport", "velo"]
+    },
+    "Hujjatlar & Visa": {
+        "id": 8,
+        "keywords": ["iqoma", "visa", "bank", "karta", "stc"]
+    },
+    "Bozor & Narxlar": {
+        "id": 9,
+        "keywords": ["narx", "bozor", "qimmat", "arzon"]
+    },
+    "Ziyorat & Umra": {
+        "id": 10,
+        "keywords": ["umra", "ziyorat", "madina", "makka"]
+    },
+    "Salomatlik": {
+        "id": 11,
+        "keywords": ["kasal", "doktor", "dori", "salomatlik"]
+    },
+    "Umumiy savollar": {
+        "id": 12,
+        "keywords": []
+    }
 }
 
-# ============================================
-
-logging.basicConfig(level=logging.INFO)
-
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN topilmadi")
-
-# =============== HANDLERS ===================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 Saudiya Smart Bot ishga tushdi")
-
-async def route_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-    if not msg or not msg.text:
+# ===== ASOSIY LOGIKA =====
+async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
         return
 
-    if ALLOWED_CHAT_ID and msg.chat.id != ALLOWED_CHAT_ID:
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
         return
 
-    text = msg.text.lower()
+    text = update.message.text.lower()
 
-    for keyword, topic_id in TOPICS.items():
-        if keyword in text:
-            await context.bot.send_message(
-                chat_id=msg.chat.id,
-                text=f"📌 Savolingiz shu bo‘limga mos:\n➡️ Topic ID: {topic_id}",
-                message_thread_id=topic_id
+    for name, data in TOPICS.items():
+        if any(k in text for k in data["keywords"]):
+            await context.bot.copy_message(
+                chat_id=update.effective_chat.id,
+                from_chat_id=update.effective_chat.id,
+                message_id=update.message.message_id,
+                message_thread_id=data["id"]
+            )
+            await update.message.reply_text(
+                f"📌 Savolingiz **{name}** bo‘limiga ko‘chirildi.\n"
+                f"Iltimos, shu bo‘limda davom ettiring 🙌"
             )
             return
 
-    await msg.reply_text(
-        "❓ Savolingiz aniq bo‘limga tushmadi.\n"
-        "Iltimos, aniqroq yozing yoki umumiy bo‘limga yozing."
+    # Agar hech biriga tushmasa → Umumiy savollar
+    await context.bot.copy_message(
+        chat_id=update.effective_chat.id,
+        from_chat_id=update.effective_chat.id,
+        message_id=update.message.message_id,
+        message_thread_id=12
+    )
+    await update.message.reply_text(
+        "📌 Savolingiz **Umumiy savollar** bo‘limiga joylandi."
     )
 
-# ================== MAIN ====================
+# ===== START =====
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, route_message))
-
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, router))
+    print("🤖 Saudiya Smart Topic Bot ishga tushdi")
     app.run_polling()
 
 if __name__ == "__main__":
