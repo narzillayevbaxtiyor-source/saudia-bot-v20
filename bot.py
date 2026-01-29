@@ -42,25 +42,13 @@ def tokenize(s: str) -> List[str]:
     return [p for p in parts if p]
 
 # ================== TOPICS + KEYWORDS ==================
-# Topic ID lar (siz bergan):
-# Uy-joy & Ijara = 5
-# Ish & Daromad = 6
-# Transport & Taksi = 7
-# Hujjatlar & Visa = 8
-# Bozor & Narxlar = 9
-# Ziyorat & Umra = 10
-# Salomatlik = 11
-# Umumiy savollar = 12  (fallback EMAS! faqat keyword bo'lsa tushadi)
-
 TOPICS: Dict[str, Dict[str, object]] = {
     "Uy-joy & Ijara": {
         "id": 5,
         "keywords": [
-            # lotin
             "uy", "uy-joy", "ijara", "ijaraga", "kvartira", "xona", "xonadon", "yotoqxona",
             "hostel", "otel", "arenda", "kira", "depozit", "zalog", "renta",
             "shartnoma", "dogovor", "kommunal", "internet", "wifi",
-            # krill + rus
             "уй", "ижара", "квартира", "аренда", "комната", "общежитие", "снять", "сдаю",
         ],
     },
@@ -116,7 +104,6 @@ TOPICS: Dict[str, Dict[str, object]] = {
     "Umumiy savollar": {
         "id": 12,
         "keywords": [
-            # Faqat umumiy savol keywordlari bo'lsa shu topicga yo'naltiradi.
             "qanday", "qayerda", "qachon", "yordam", "maslahat", "savol",
             "қандай", "қаерда", "қачон", "ёрдам", "маслаҳат", "савол",
             "как", "где", "когда", "помогите", "вопрос",
@@ -127,7 +114,7 @@ TOPICS: Dict[str, Dict[str, object]] = {
 ID_TO_NAME = {int(v["id"]): k for k, v in TOPICS.items()}
 
 # ================== COMPILE KEYWORDS ==================
-COMPILED: Dict[int, Dict[str, object]] = {}  # tid -> {"name":..., "token_kws":set, "phrase_kws":list}
+COMPILED: Dict[int, Dict[str, object]] = {}
 ALL_PHRASE_KWS: List[Tuple[str, int]] = []
 
 for name, data in TOPICS.items():
@@ -150,19 +137,13 @@ def allowed_chat(update: Update) -> bool:
     return bool(chat and chat.id == ALLOWED_CHAT_ID)
 
 def detect_topic_id_if_any(text: str) -> Optional[int]:
-    """
-    Faqat keyword topilsa topic qaytaradi.
-    Keyword bo'lmasa None (bot JIM).
-    """
     t_norm = normalize_text(text)
     toks = set(tokenize(t_norm))
 
-    # phrase match
     for ph, tid in ALL_PHRASE_KWS:
         if ph and ph in t_norm:
             return tid
 
-    # token match
     for tid, obj in COMPILED.items():
         if obj["token_kws"] & toks:
             return tid
@@ -174,11 +155,9 @@ def build_topic_link(update: Update, topic_id: int) -> str:
     if not chat:
         return ""
 
-    # Public group (username bor)
     if getattr(chat, "username", None):
         return f"https://t.me/{chat.username}/{topic_id}"
 
-    # Private/supergroup: -100123... -> t.me/c/123.../topic
     cid = str(chat.id)
     if cid.startswith("-100"):
         internal = cid[4:]
@@ -188,10 +167,10 @@ def build_topic_link(update: Update, topic_id: int) -> str:
     return f"https://t.me/c/{internal}/{topic_id}"
 
 def build_redirect_text(topic_name: str, link: str) -> str:
-    # Siz xohlagan mobile ko'rinish + oxirida 👇
+    # Markdown yo‘q! Shuning uchun ** ishlatmaymiz
     return (
         "Iltimos, bu masalani 👇\n\n"
-        f"**{topic_name}**\n\n"
+        f"{topic_name}\n\n"
         "bo‘limiga yozing:\n\n"
         f"{link} 👇"
     )
@@ -222,20 +201,15 @@ async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed_chat(update):
         return
 
-    text = msg.text
-
-    # 0) Keyword bo'lmasa -> JIM
-    target_topic_id = detect_topic_id_if_any(text)
+    target_topic_id = detect_topic_id_if_any(msg.text)
     if target_topic_id is None:
-        return
+        return  # JIM
 
     current_tid = getattr(msg, "message_thread_id", None)
-
-    # 1) To'g'ri topic ichida bo'lsa -> JIM
     if current_tid == target_topic_id:
-        return
+        return  # to‘g‘ri topic -> JIM
 
-    # 2) Copy qilamiz (xato bo'lsa ham reply baribir ketadi)
+    # 1) Copy (xato bo‘lsa ham reply yuboramiz)
     copied_ok = False
     try:
         await context.bot.copy_message(
@@ -248,26 +222,20 @@ async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         log.exception("copy_message error")
 
-    # 3) Reply + link (reply KERAK dedingiz)
+    # 2) Reply + link (doim ishlaydi, parse_mode yo‘q)
     topic_name = ID_TO_NAME.get(target_topic_id, "kerakli bo‘lim")
     link = build_topic_link(update, target_topic_id)
     reply_text = build_redirect_text(topic_name, link)
 
     try:
-        await msg.reply_text(
-            reply_text,
-            parse_mode="Markdown",
-            disable_web_page_preview=True,
-        )
+        await msg.reply_text(reply_text, disable_web_page_preview=True)
     except Exception:
         log.exception("reply_text error")
 
-    # ixtiyoriy log
     log.info("Redirected: from_tid=%s -> to_tid=%s copied=%s", current_tid, target_topic_id, copied_ok)
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("topics", topics_cmd))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, router))
