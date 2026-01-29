@@ -1,10 +1,18 @@
 import os
 import re
+import time
 import logging
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.error import Conflict, NetworkError, TimedOut
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
 # ================== ENV ==================
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
@@ -22,8 +30,22 @@ logging.basicConfig(
 )
 log = logging.getLogger("saudiya-topic-bot")
 
+# ================== TEXT NORMALIZE ==================
+_SPLIT_RE = re.compile(r"[^\w'’`\-]+", flags=re.UNICODE)
+
+def normalize_text(s: str) -> str:
+    s = (s or "").lower().strip()
+    s = s.replace("’", "'").replace("`", "'")
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+def tokenize(s: str) -> List[str]:
+    s = normalize_text(s)
+    parts = _SPLIT_RE.split(s)
+    return [p for p in parts if p]
+
 # ================== TOPICS + KEYWORDS ==================
-# Siz bergan IDlar:
+# Topic ID lar:
 # Uy-joy & Ijara = 5
 # Ish & Daromad = 6
 # Transport & Taksi = 7
@@ -33,75 +55,93 @@ log = logging.getLogger("saudiya-topic-bot")
 # Salomatlik = 11
 # Umumiy savollar = 12
 
-TOPICS: Dict[str, Dict[str, List[str] or int]] = {
+TOPICS: Dict[str, Dict[str, object]] = {
     "Uy-joy & Ijara": {
         "id": 5,
         "keywords": [
-            # lotin
-            "uy", "uy-joy", "ijara", "kvartira", "xona", "xonadon", "yotoqxona", "hostel",
-            "arenda", "ijaraga", "ijara uy", "uy topish", "kira", "depozit", "zalog",
-            "renta", "komunal", "kommunal", "internet", "wifi", "mebel", "mebellik",
-            "shartnoma", "dogovor",
-            # krill
-            "уй", "уй-жой", "ижара", "квартира", "хона", "хонaдон", "ётоқхона",
-            "аренда", "уй топиш", "кира", "депозит", "залог", "шартнома", "договор",
-            # ruscha
-            "квартира", "аренда", "снять", "сдаю", "комната", "общежитие", "залог",
+            # --- UY / IJARA (lotin)
+            "uy", "uy-joy", "ijara", "ijaraga", "ijara uy", "uy topish", "uy qidiryapman",
+            "kvartira", "kvartiraga", "xona", "xonadon", "yotoqxona", "hostel", "otel",
+            "arenda", "arendaga", "kira", "depozit", "zalog", "renta",
+            "shartnoma", "dogovor", "kelishuv",
+            "kommunal", "komunal", "elektr", "svet", "gaz", "suv", "internet", "wifi",
+            "mebel", "mebellik", "konditsioner", "konditsaner", "klimat",
+            "ko'chib o'tish", "ko'chish", "manzil", "lokatsiya",
+            # --- KRIL (uz)
+            "уй", "уй-жой", "ижара", "ижарага", "ижара уй", "уй топиш", "уй қидиряпман",
+            "квартира", "хона", "хонaдон", "ётоқхона", "хостел", "отель",
+            "аренда", "кира", "депозит", "залог",
+            "шартнома", "договор", "келишув",
+            "коммунал", "электр", "свет", "газ", "сув", "интернет", "вайфай",
+            # --- RUS
+            "квартира", "аренда", "снять", "сдаю", "сдам", "комната", "общежитие",
+            "залог", "договор", "коммуналка", "интернет", "wi-fi",
         ],
     },
     "Ish & Daromad": {
         "id": 6,
         "keywords": [
             # lotin
-            "ish", "ish bor", "ish topish", "vakansiya", "rezume", "cv", "ish haqqi",
-            "oylik", "maosh", "daromad", "kuryer", "dostavka", "delivery", "part time",
-            "to'liq stavka", "ishchi", "usta", "shogird",
-            # krill
-            "иш", "иш бор", "иш топиш", "вакансия", "резюме", "ойлик", "маош",
-            "даромад", "курьер", "доставка", "ишчи", "уста", "шогирд",
-            # ruscha
+            "ish", "ish bor", "ish topish", "vakansiya", "rezume", "cv",
+            "oylik", "maosh", "daromad", "ish haqqi", "stavka", "part time", "full time",
+            "kuryer", "dostavka", "delivery", "haydovchi", "operator", "sotuvchi",
+            "usta", "shogird", "ishchi",
+            # kril
+            "иш", "иш бор", "иш топиш", "вакансия", "резюме",
+            "ойлик", "маош", "даромад", "курьер", "доставка", "ҳайдовчи",
+            # rus
             "работа", "вакансия", "подработка", "зарплата", "курьер", "доставка",
+            "водитель", "продавец",
         ],
     },
     "Transport & Taksi": {
         "id": 7,
         "keywords": [
-            # lotin
-            "taksi", "uber", "careem", "bolt", "transport", "avtobus", "bus", "metro",
-            "yo'l", "marshrut", "velosiped", "skuter", "mashina", "avto", "benzin",
-            "parkovka", "jarima", "gps", "lokatsiya",
-            # krill
-            "такси", "убер", "карим", "транспорт", "автобус", "метро", "йўл",
-            "маршрут", "велосипед", "скутер", "машина", "бензин", "парковка", "жарима",
-            # ruscha
+            # taksi (lotin)
+            "taksi", "taxi", "uber", "careem", "karim", "bolt",
+            "transport", "avtobus", "bus", "metro", "poezd", "train",
+            "yo'l", "marshrut", "bekat", "stansiya",
+            "velosiped", "skuter", "mashina", "avto", "benzin", "parkovka", "jarima",
+            "gps", "lokatsiya", "navigatsiya",
+            # kril
+            "такси", "убер", "карим", "транспорт", "автобус", "метро",
+            "йўл", "маршрут", "бекат", "станция",
+            "велосипед", "скутер", "машина", "бензин", "парковка", "жарима",
+            # rus
             "такси", "uber", "careem", "автобус", "метро", "штраф", "парковка",
         ],
     },
     "Hujjatlar & Visa": {
         "id": 8,
         "keywords": [
-            # lotin
-            "viza", "visa", "iqoma", "iqama", "pasport", "passport", "hujjat", "dokument",
-            "tasrix", "tasrih", "tasreh", "tasreeh", "tashrix", "muhr", "registratsiya",
+            # visa/iqoma (lotin)
+            "viza", "visa", "iqoma", "iqama", "паспорт",  # pasport so'zi ba'zan rus klaviaturada
+            "pasport", "passport", "hujjat", "dokument", "document",
+            "tasrix", "tasrih", "tasreh", "tasreeh", "tashrix", "tashrih",
+            "muhr", "registratsiya", "ro'yxat", "registration",
             "sug'urta", "insurance", "muddat", "muddati", "kafolat", "kafil",
-            "jarayon", "anketa", "biometrik",
-            # krill
+            "anketa", "biometrik", "fingerprint",
+            "стс", "stc", "absher", "abshar", "absher",  # ko‘p so‘raladi
+            # kril (uz)
             "виза", "виса", "иқома", "паспорт", "ҳужжат", "документ",
-            "тасрих", "тасрих", "муҳр", "регистрация", "суғурта", "муддат", "кафил",
-            # ruscha
-            "виза", "паспорт", "идентификация", "икама", "документы", "страховка",
+            "тасрих", "ташрих", "мухр", "муҳр", "регистрация", "рўйхат",
+            "суғурта", "муддат", "кафил", "анкета", "биометрик",
+            # rus
+            "виза", "паспорт", "икама", "документы", "страховка", "регистрация",
+            "разрешение", "tasreeh",
         ],
     },
     "Bozor & Narxlar": {
         "id": 9,
         "keywords": [
             # lotin
-            "bozor", "narx", "qimmat", "arzon", "chegirma", "skidka", "do'kon", "market",
-            "magazin", "sotib olish", "sotiladi", "olaman", "kurs", "valyuta", "sar",
-            # krill
-            "бозор", "нарх", "қиммат", "арзон", "чегирма", "сккидка", "дўкон", "маркет",
-            "магазин", "сотиб олиш", "сотилади", "курс",
-            # ruscha
+            "bozor", "narx", "qimmat", "arzon", "chegirma", "skidka",
+            "do'kon", "market", "magazin", "sotib olish", "sotiladi", "olaman",
+            "kurs", "valyuta", "sar", "riyal", "riyo'l",
+            # kril
+            "бозор", "нарх", "қиммат", "арзон", "чегирма", "дўкон", "маркет",
+            "магазин", "курс", "валюта", "риал",
+            # rus
             "цена", "рынок", "дешево", "дорого", "скидка", "магазин", "купить",
         ],
     },
@@ -109,14 +149,16 @@ TOPICS: Dict[str, Dict[str, List[str] or int]] = {
         "id": 10,
         "keywords": [
             # lotin
-            "ziyorat", "umra", "haj", "makka", "makka", "madina", "masjid", "rawza",
-            "ravza", "nusuk", "haram", "tawaf", "tavof", "sa'y", "sa'y", "ihram",
-            "ziyorat joylari", "manosik",
-            # krill
+            "ziyorat", "umra", "haj", "makka", "madina", "masjid", "rawza", "ravza",
+            "nusuk", "haram", "tawaf", "tavof", "sa'y", "say", "ihram", "manosik",
+            "bilet", "avia bilet", "aviabilet", "reys", "flight", "chipta", "chipta olish",
+            # kril
             "зиёрат", "умра", "ҳаҗ", "макка", "мадина", "масжид", "равза", "ҳарам",
-            "тавoф", "саъй", "иҳром",
-            # ruscha
+            "тавoф", "саъй", "иҳром", "маносик",
+            "билет", "авиабилет", "рейс", "чипта",
+            # rus
             "умра", "хадж", "мекка", "медина", "таваф", "саи", "ихрам",
+            "билет", "авиабилет", "рейс", "самолет",
         ],
     },
     "Salomatlik": {
@@ -125,10 +167,10 @@ TOPICS: Dict[str, Dict[str, List[str] or int]] = {
             # lotin
             "kasal", "og'riq", "dori", "doktor", "shifokor", "kasalxona", "apteka",
             "allergiya", "isitma", "yo'tal", "bosim", "tomoq", "tish", "tez yordam",
-            # krill
+            # kril
             "касал", "оғриқ", "дори", "доктор", "шифокор", "касалхона", "аптека",
             "аллергия", "иситма", "йўтал", "босим", "томоқ", "тиш",
-            # ruscha
+            # rus
             "врач", "больница", "аптека", "лекарство", "аллергия", "температура",
         ],
     },
@@ -136,95 +178,125 @@ TOPICS: Dict[str, Dict[str, List[str] or int]] = {
         "id": 12,
         "keywords": [
             # lotin
-            "savol", "qanday", "qayerda", "qachon", "yordam", "maslahat",
-            # krill
+            "savol", "qanday", "qayerda", "qachon", "yordam", "maslahat", "bilasizmi",
+            # kril
             "савол", "қандай", "қаерда", "қачон", "ёрдам", "маслаҳат",
-            # ruscha
+            # rus
             "вопрос", "как", "где", "когда", "помогите",
         ],
     },
 }
 
-# Oldindan regex tayyorlab qo'yamiz (tezroq ishlashi uchun)
-def _compile_keywords(topic_keywords: List[str]):
-    # \b bilan ishlasa krill/uzbek apostrofda qiyin bo'lishi mumkin, shuning uchun "contains" + normalizatsiya
-    # Bu yerda regex ishlatmaymiz — pastda oddiy "in" ishlatamiz.
-    return topic_keywords
+DEFAULT_TOPIC_ID = int(TOPICS["Umumiy savollar"]["id"])
 
-for _t in TOPICS.values():
-    _t["keywords"] = _compile_keywords(_t["keywords"])
+# Precompute token keywords vs phrase keywords
+# - token_keywords: tek so'zlar (token ichida)
+# - phrase_keywords: bo'shliq yoki '-' bo'lgan iboralar (matn ichida)
+COMPILED: Dict[str, Dict[str, object]] = {}
+for name, data in TOPICS.items():
+    kws = [normalize_text(x) for x in data["keywords"] if x and normalize_text(x)]
+    token_kws = set()
+    phrase_kws = []
+    for kw in kws:
+        if " " in kw or "-" in kw:
+            phrase_kws.append(kw)
+        else:
+            token_kws.add(kw)
+    COMPILED[name] = {
+        "id": int(data["id"]),
+        "token_kws": token_kws,
+        "phrase_kws": phrase_kws,
+    }
 
-# ================== HELPERS ==================
-def normalize_text(s: str) -> str:
-    s = s.lower().strip()
-    s = s.replace("’", "'").replace("`", "'")
-    s = re.sub(r"\s+", " ", s)
-    return s
-
-def find_topic_id(text: str) -> int:
-    t = normalize_text(text)
-    for name, data in TOPICS.items():
-        for kw in data["keywords"]:
-            if kw and kw in t:
-                return int(data["id"])
-    return int(TOPICS["Umumiy savollar"]["id"])
-
+# ================== ACCESS ==================
 def allowed_chat(update: Update) -> bool:
     chat = update.effective_chat
     return bool(chat and chat.id == ALLOWED_CHAT_ID)
 
+# ================== TOPIC MATCH ==================
+def find_topic_id(text: str) -> int:
+    t_norm = normalize_text(text)
+    toks = set(tokenize(t_norm))
+
+    for name, data in COMPILED.items():
+        # phrase match
+        for ph in data["phrase_kws"]:
+            if ph in t_norm:
+                return int(data["id"])
+        # token match
+        if data["token_kws"] & toks:
+            return int(data["id"])
+
+    return DEFAULT_TOPIC_ID
+
 # ================== HANDLERS ==================
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # faqat shu guruhda ishlaydi
     if not allowed_chat(update):
         return
-    await update.message.reply_text(
-        "👋 Assalomu alaykum!\n\nSavolingizni yozing — bot uni avtomatik ravishda to‘g‘ri bo‘limga (topic) joylaydi 🤖"
+    await update.effective_message.reply_text(
+        "👋 Assalomu alaykum!\n\n"
+        "Savolingizni yozing — bot uni avtomatik ravishda to‘g‘ri bo‘lim (topic)ga ko‘chiradi 🤖"
     )
 
 async def topics_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed_chat(update):
         return
     lines = ["📌 Topiclar ro‘yxati (ID):"]
-    for name, data in TOPICS.items():
+    for name, data in COMPILED.items():
         lines.append(f"• {name} = {data['id']}")
-    await update.message.reply_text("\n".join(lines))
+    await update.effective_message.reply_text("\n".join(lines))
 
 async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
+    msg = update.effective_message
+    if not msg or not getattr(msg, "text", None):
         return
     if not allowed_chat(update):
         return
 
-    # buyruqlarni bu handlerga kiritmaymiz (filters.COMMAND bilan to'siladi)
-    text = update.message.text
+    text = msg.text
     topic_id = find_topic_id(text)
 
-    # Agar user topic ichida yozgan bo'lsa ham, biz uni kerakli topicga ko'chiramiz:
+    # Agar xabar allaqachon shu topic ichida bo'lsa — hech narsa qilmaymiz
+    if getattr(msg, "message_thread_id", None) == topic_id:
+        return
+
     try:
         await context.bot.copy_message(
             chat_id=update.effective_chat.id,
             from_chat_id=update.effective_chat.id,
-            message_id=update.message.message_id,
+            message_id=msg.message_id,
             message_thread_id=topic_id,
         )
-        # ixtiyoriy: userga qisqa tasdiq (spam bo'lmasin desangiz kommentni o'chiring)
-        # await update.message.reply_text(f"✅ Topicga joylandi: {topic_id}")
-    except Exception as e:
-        log.exception("copy_message error: %s", e)
+    except Exception:
+        log.exception("copy_message error")
 
-# ================== MAIN ==================
-def main():
+# ================== BUILD APP ==================
+def build_app() -> Application:
     app = Application.builder().token(BOT_TOKEN).build()
-
     app.add_handler(CommandHandler(["start"], start_cmd))
     app.add_handler(CommandHandler(["topics"], topics_cmd))
-
-    # Faqat oddiy text xabarlar
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, router))
+    return app
 
-    log.info("✅ Saudiya Smart Topic Bot ishga tushdi (faqat bitta guruh uchun).")
-    app.run_polling(drop_pending_updates=True)
+# ================== MAIN (STABLE) ==================
+def main():
+    log.info("✅ Saudiya Smart Topic Bot start (faqat bitta guruh uchun). ALLOWED_CHAT_ID=%s", ALLOWED_CHAT_ID)
+
+    while True:
+        try:
+            app = build_app()
+            # drop_pending_updates=True: eski update larni tashlab yuboradi
+            app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
+        except Conflict:
+            # 2 ta instans bir payt ishlasa conflict bo'ladi. Bot o‘chib ketmasin.
+            log.warning("⚠️ Conflict: boshqa instans polling qilyapti. 15s kutib qayta urinaman...")
+            time.sleep(15)
+        except (TimedOut, NetworkError) as e:
+            log.warning("⚠️ Network/Timeout: %s. 10s kutib qayta urinaman...", e)
+            time.sleep(10)
+        except Exception as e:
+            log.exception("❌ Kutilmagan xato: %s. 10s kutib qayta urinaman...", e)
+            time.sleep(10)
 
 if __name__ == "__main__":
     main()
