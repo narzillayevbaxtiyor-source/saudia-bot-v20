@@ -50,7 +50,7 @@ def tokenize(s: str) -> List[str]:
 # Bozor & Narxlar = 9
 # Ziyorat & Umra = 10
 # Salomatlik = 11
-# Umumiy savollar = 12
+# Umumiy savollar = 1
 
 TOPICS: Dict[str, Dict[str, object]] = {
     "Uy-joy & Ijara": {
