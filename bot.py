@@ -248,10 +248,10 @@ async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # link bo'lmasa ham matn chiqsin
         if link:
             reply_text = (
-                f"🙏 Iltimos, bu masalani **{topic_name}** bo‘limiga yozing:\n{link}"
+                f" Iltimos, bu masalani **{topic_name}** bo‘limiga yozing:\n{link}"
             )
         else:
-            reply_text = f"🙏 Iltimos, bu masalani **{topic_name}** bo‘limiga yozing."
+            reply_text = f" Iltimos, bu masalani **{topic_name}** bo‘limiga yozing."
 
         # HTML ishlatsak bold oson bo'ladi
         await msg.reply_text(reply_text, parse_mode="HTML", disable_web_page_preview=True)
