@@ -44,7 +44,7 @@ def tokenize(s: str) -> List[str]:
 # ================== TOPICS + KEYWORDS ==================
 TOPICS: Dict[str, Dict[str, object]] = {
     "Uy-joy & Ijara": {
-        "id": 5,
+        "id": 197,
         "keywords": [
             "uy", "uy-joy", "ijara", "ijaraga", "kvartira", "xona", "xonadon", "yotoqxona",
             "hostel", "otel", "arenda", "kira", "depozit", "zalog", "renta",
@@ -53,7 +53,7 @@ TOPICS: Dict[str, Dict[str, object]] = {
         ],
     },
     "Ish & Daromad": {
-        "id": 6,
+        "id": 198,
         "keywords": [
             "ish", "ish bor", "vakansiya", "rezume", "cv", "oylik", "maosh", "daromad",
             "kuryer", "dostavka", "delivery", "part time",
@@ -61,7 +61,7 @@ TOPICS: Dict[str, Dict[str, object]] = {
         ],
     },
     "Transport & Taksi": {
-        "id": 7,
+        "id": 199,
         "keywords": [
             "taksi", "taxi", "uber", "careem", "karim", "bolt", "transport",
             "avtobus", "bus", "metro", "yo'l", "marshrut",
@@ -69,7 +69,7 @@ TOPICS: Dict[str, Dict[str, object]] = {
         ],
     },
     "Hujjatlar & Visa": {
-        "id": 8,
+        "id": 200,
         "keywords": [
             "viza", "visa", "iqoma", "iqama", "pasport", "passport", "hujjat", "dokument",
             "tasrix", "tasrih", "tasreeh", "tashrix",
@@ -78,7 +78,7 @@ TOPICS: Dict[str, Dict[str, object]] = {
         ],
     },
     "Bozor & Narxlar": {
-        "id": 9,
+        "id": 201,
         "keywords": [
             "bozor", "narx", "qimmat", "arzon", "chegirma", "skidka", "market", "magazin",
             "sotiladi", "olaman", "kurs", "valyuta", "sar",
@@ -86,7 +86,7 @@ TOPICS: Dict[str, Dict[str, object]] = {
         ],
     },
     "Ziyorat & Umra": {
-        "id": 10,
+        "id": 202,
         "keywords": [
             "ziyorat", "umra", "haj", "makka", "madina", "rawza", "ravza", "nusuk", "haram",
             "bilet", "aviabilet", "chipta", "reys", "flight",
@@ -94,7 +94,7 @@ TOPICS: Dict[str, Dict[str, object]] = {
         ],
     },
     "Salomatlik": {
-        "id": 11,
+        "id": 203,
         "keywords": [
             "kasal", "og'riq", "dori", "doktor", "shifokor", "kasalxona", "apteka",
             "allergiya", "isitma", "yo'tal", "bosim",
