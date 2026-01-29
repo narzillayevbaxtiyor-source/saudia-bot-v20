@@ -1,14 +1,20 @@
 import os
 from telegram import Update
-from telegram.ext import Application, MessageHandler, ContextTypes, filters
+from telegram.ext import (
+    Application,
+    MessageHandler,
+    CommandHandler,
+    ContextTypes,
+    filters,
+)
 
-BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 ALLOWED_CHAT_ID = int(os.getenv("ALLOWED_CHAT_ID", "0"))
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN topilmadi. Railway Variables ga BOT_TOKEN qo‘ying.")
 
-# ===== TOPIC ID LAR =====
+# ===== TOPIC LAR =====
 TOPICS = {
     "Uy-joy & Ijara": {
         "id": 5,
@@ -44,12 +50,22 @@ TOPICS = {
     }
 }
 
-# ===== ASOSIY LOGIKA =====
+# ===== /start =====
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "👋 Assalomu alaykum!\n\n"
+        "Savolingizni yozing — bot uni avtomatik ravishda "
+        "to‘g‘ri bo‘limga joylaydi 🤖"
+    )
+
+# ===== ROUTER =====
 async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
-    if update.effective_chat.id != ALLOWED_CHAT_ID:
+    # Chat tekshiruvi
+    if ALLOWED_CHAT_ID != 0 and update.effective_chat.id != ALLOWED_CHAT_ID:
+        await update.message.reply_text("❌ Bu bot faqat ruxsat berilgan guruhda ishlaydi.")
         return
 
     text = update.message.text.lower()
@@ -63,12 +79,11 @@ async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 message_thread_id=data["id"]
             )
             await update.message.reply_text(
-                f"📌 Savolingiz **{name}** bo‘limiga ko‘chirildi.\n"
-                f"Iltimos, shu bo‘limda davom ettiring 🙌"
+                f"✅ Savolingiz **{name}** bo‘limiga joylandi."
             )
             return
 
-    # Agar hech biriga tushmasa → Umumiy savollar
+    # Hech qaysiga tushmasa → Umumiy
     await context.bot.copy_message(
         chat_id=update.effective_chat.id,
         from_chat_id=update.effective_chat.id,
@@ -76,13 +91,16 @@ async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message_thread_id=12
     )
     await update.message.reply_text(
-        "📌 Savolingiz **Umumiy savollar** bo‘limiga joylandi."
+        "ℹ️ Savolingiz **Umumiy savollar** bo‘limiga joylandi."
     )
 
-# ===== START =====
+# ===== MAIN =====
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, router))
+
     print("🤖 Saudiya Smart Topic Bot ishga tushdi")
     app.run_polling()
 
