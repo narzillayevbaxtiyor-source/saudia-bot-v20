@@ -248,7 +248,10 @@ async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # link bo'lmasa ham matn chiqsin
         if link:
             reply_text = (
-                f" Iltimos, bu masalani **{topic_name}** bo‘limiga yozing:\n{link}"
+    "Iltimos, bu masalani 👇\n\n"
+    f"**{topic_name}**\n\n"
+    "bo‘limiga yozing:\n\n"
+    f"{link}"
             )
         else:
             reply_text = f" Iltimos, bu masalani **{topic_name}** bo‘limiga yozing."
