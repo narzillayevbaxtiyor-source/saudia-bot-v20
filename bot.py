@@ -1,7 +1,7 @@
 import os
 import re
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 from telegram import Update
 from telegram.ext import (
@@ -50,12 +50,13 @@ def tokenize(s: str) -> List[str]:
 # Bozor & Narxlar = 9
 # Ziyorat & Umra = 10
 # Salomatlik = 11
-# Umumiy savollar = 1
+# Umumiy savollar = 12  (fallback EMAS! faqat keyword bo'lsa tushadi)
 
 TOPICS: Dict[str, Dict[str, object]] = {
     "Uy-joy & Ijara": {
         "id": 5,
         "keywords": [
+            # lotin
             "uy", "uy-joy", "ijara", "ijaraga", "kvartira", "xona", "xonadon", "yotoqxona",
             "hostel", "otel", "arenda", "kira", "depozit", "zalog", "renta",
             "shartnoma", "dogovor", "kommunal", "internet", "wifi",
@@ -66,17 +67,17 @@ TOPICS: Dict[str, Dict[str, object]] = {
     "Ish & Daromad": {
         "id": 6,
         "keywords": [
-            "ish", "vakansiya", "rezume", "cv", "oylik", "maosh", "daromad", "kuryer",
-            # krill + rus
-            "иш", "вакансия", "работа", "зарплата", "курьер",
+            "ish", "ish bor", "vakansiya", "rezume", "cv", "oylik", "maosh", "daromad",
+            "kuryer", "dostavka", "delivery", "part time",
+            "иш", "вакансия", "работа", "зарплата", "курьер", "подработка",
         ],
     },
     "Transport & Taksi": {
         "id": 7,
         "keywords": [
-            "taksi", "taxi", "uber", "careem", "karim", "transport", "avtobus", "bus", "metro",
-            # krill + rus
-            "такси", "убер", "карим", "автобус", "метро",
+            "taksi", "taxi", "uber", "careem", "karim", "bolt", "transport",
+            "avtobus", "bus", "metro", "yo'l", "marshrut",
+            "такси", "убер", "карим", "автобус", "метро", "транспорт",
         ],
     },
     "Hujjatlar & Visa": {
@@ -84,8 +85,7 @@ TOPICS: Dict[str, Dict[str, object]] = {
         "keywords": [
             "viza", "visa", "iqoma", "iqama", "pasport", "passport", "hujjat", "dokument",
             "tasrix", "tasrih", "tasreeh", "tashrix",
-            "absher", "stc", "sug'urta",
-            # krill + rus
+            "absher", "stc", "sug'urta", "insurance", "muhr", "registratsiya",
             "виза", "иқома", "паспорт", "ҳужжат", "документ", "тасрих", "икама",
         ],
     },
@@ -93,8 +93,8 @@ TOPICS: Dict[str, Dict[str, object]] = {
         "id": 9,
         "keywords": [
             "bozor", "narx", "qimmat", "arzon", "chegirma", "skidka", "market", "magazin",
-            # krill + rus
-            "бозор", "нарх", "скидка", "цена", "рынок",
+            "sotiladi", "olaman", "kurs", "valyuta", "sar",
+            "бозор", "нарх", "скидка", "цена", "рынок", "курс",
         ],
     },
     "Ziyorat & Umra": {
@@ -102,7 +102,6 @@ TOPICS: Dict[str, Dict[str, object]] = {
         "keywords": [
             "ziyorat", "umra", "haj", "makka", "madina", "rawza", "ravza", "nusuk", "haram",
             "bilet", "aviabilet", "chipta", "reys", "flight",
-            # krill + rus
             "зиёрат", "умра", "хаҗ", "макка", "мадина", "билет", "авиабилет", "рейс",
         ],
     },
@@ -110,9 +109,17 @@ TOPICS: Dict[str, Dict[str, object]] = {
         "id": 11,
         "keywords": [
             "kasal", "og'riq", "dori", "doktor", "shifokor", "kasalxona", "apteka",
-            "allergiya", "isitma", "yo'tal",
-            # krill + rus
-            "касал", "дори", "доктор", "врач", "аптека", "аллергия",
+            "allergiya", "isitma", "yo'tal", "bosim",
+            "касал", "дори", "доктор", "врач", "аптека", "аллергия", "температура",
+        ],
+    },
+    "Umumiy savollar": {
+        "id": 12,
+        "keywords": [
+            # Faqat umumiy savol keywordlari bo'lsa shu topicga yo'naltiradi.
+            "qanday", "qayerda", "qachon", "yordam", "maslahat", "savol",
+            "қандай", "қаерда", "қачон", "ёрдам", "маслаҳат", "савол",
+            "как", "где", "когда", "помогите", "вопрос",
         ],
     },
 }
@@ -120,14 +127,12 @@ TOPICS: Dict[str, Dict[str, object]] = {
 ID_TO_NAME = {int(v["id"]): k for k, v in TOPICS.items()}
 
 # ================== COMPILE KEYWORDS ==================
-# token match + phrase match
-COMPILED: Dict[int, Dict[str, object]] = {}  # topic_id -> {"name":..., "token_kws":set, "phrase_kws":list}
-ALL_TOKEN_KWS = set()
-ALL_PHRASE_KWS = []
+COMPILED: Dict[int, Dict[str, object]] = {}  # tid -> {"name":..., "token_kws":set, "phrase_kws":list}
+ALL_PHRASE_KWS: List[Tuple[str, int]] = []
 
 for name, data in TOPICS.items():
     tid = int(data["id"])
-    kws = [normalize_text(x) for x in data["keywords"] if x and normalize_text(x)]
+    kws = [normalize_text(x) for x in (data["keywords"] or []) if x and normalize_text(x)]
 
     token_kws = set()
     phrase_kws = []
@@ -137,7 +142,6 @@ for name, data in TOPICS.items():
             ALL_PHRASE_KWS.append((kw, tid))
         else:
             token_kws.add(kw)
-            ALL_TOKEN_KWS.add(kw)
 
     COMPILED[tid] = {"name": name, "token_kws": token_kws, "phrase_kws": phrase_kws}
 
@@ -145,17 +149,17 @@ def allowed_chat(update: Update) -> bool:
     chat = update.effective_chat
     return bool(chat and chat.id == ALLOWED_CHAT_ID)
 
-def detect_topic_id_if_any(text: str) -> int | None:
+def detect_topic_id_if_any(text: str) -> Optional[int]:
     """
-    Faqat keyword bo'lsa topic qaytaradi.
-    Keyword bo'lmasa None (bot jim turadi).
+    Faqat keyword topilsa topic qaytaradi.
+    Keyword bo'lmasa None (bot JIM).
     """
     t_norm = normalize_text(text)
     toks = set(tokenize(t_norm))
 
     # phrase match
     for ph, tid in ALL_PHRASE_KWS:
-        if ph in t_norm:
+        if ph and ph in t_norm:
             return tid
 
     # token match
@@ -183,20 +187,30 @@ def build_topic_link(update: Update, topic_id: int) -> str:
     internal = str(abs(chat.id))
     return f"https://t.me/c/{internal}/{topic_id}"
 
+def build_redirect_text(topic_name: str, link: str) -> str:
+    # Siz xohlagan mobile ko'rinish + oxirida 👇
+    return (
+        "Iltimos, bu masalani 👇\n\n"
+        f"**{topic_name}**\n\n"
+        "bo‘limiga yozing:\n\n"
+        f"{link} 👇"
+    )
+
 # ================== HANDLERS ==================
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed_chat(update):
         return
     await update.effective_message.reply_text(
-        "👋 Assalomu alaykum!\n\n"
-        "Kalit so‘zlar bo‘yicha noto‘g‘ri bo‘limga yozilsa, bot yo‘naltiradi.\n"
+        "Assalomu alaykum!\n\n"
+        "Bot faqat keyword bo‘lsa ishlaydi.\n"
+        "Noto‘g‘ri bo‘limga yozilsa, reply qilib to‘g‘ri bo‘lim linkini beradi.\n"
         "Boshqa payt jim turadi."
     )
 
 async def topics_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not allowed_chat(update):
         return
-    lines = ["📌 Topiclar (ID):"]
+    lines = ["Topiclar (ID):"]
     for tid, obj in sorted(COMPILED.items(), key=lambda x: x[0]):
         lines.append(f"• {obj['name']} = {tid}")
     await update.effective_message.reply_text("\n".join(lines))
@@ -210,18 +224,19 @@ async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = msg.text
 
-    # 0) Faqat keyword bo'lsa ishlaymiz; keyword bo'lmasa -> JIM
+    # 0) Keyword bo'lmasa -> JIM
     target_topic_id = detect_topic_id_if_any(text)
     if target_topic_id is None:
         return
 
     current_tid = getattr(msg, "message_thread_id", None)
 
-    # 1) Agar user to'g'ri topic ichida yozgan bo'lsa -> JIM
+    # 1) To'g'ri topic ichida bo'lsa -> JIM
     if current_tid == target_topic_id:
         return
 
-    # 2) Noto'g'ri topicda yozgan bo'lsa -> ko'chiramiz
+    # 2) Copy qilamiz (xato bo'lsa ham reply baribir ketadi)
+    copied_ok = False
     try:
         await context.bot.copy_message(
             chat_id=update.effective_chat.id,
@@ -229,30 +244,35 @@ async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message_id=msg.message_id,
             message_thread_id=target_topic_id,
         )
+        copied_ok = True
     except Exception:
         log.exception("copy_message error")
-        return
 
-    # 3) Va faqat shu holatda reply + link
+    # 3) Reply + link (reply KERAK dedingiz)
     topic_name = ID_TO_NAME.get(target_topic_id, "kerakli bo‘lim")
     link = build_topic_link(update, target_topic_id)
+    reply_text = build_redirect_text(topic_name, link)
 
-    reply_text = (
-        "Iltimos, bu masalani 👇\n\n"
-        f"**{topic_name}**\n\n"
-        "bo‘limiga yozing:\n\n"
-        f"{link} 👇"
-    )
+    try:
+        await msg.reply_text(
+            reply_text,
+            parse_mode="Markdown",
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        log.exception("reply_text error")
 
-    await msg.reply_text(reply_text, parse_mode="Markdown", disable_web_page_preview=True)
+    # ixtiyoriy log
+    log.info("Redirected: from_tid=%s -> to_tid=%s copied=%s", current_tid, target_topic_id, copied_ok)
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("topics", topics_cmd))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, router))
 
-    log.info("✅ Saudiya Smart Topic Bot ishga tushdi (faqat bitta guruh, faqat keyword bo'lsa).")
+    log.info("✅ Bot start (faqat bitta guruh, faqat keyword bo'lsa; noto‘g‘ri bo‘limda reply).")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
