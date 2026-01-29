@@ -126,7 +126,7 @@ TOPICS: Dict[str, Dict[str, object]] = {
         ],
     },
     "Umumiy savollar": {
-        "id": 12,
+        "id": 1,
         "keywords": [
             "savol", "qanday", "qayerda", "qachon", "yordam", "maslahat",
             "савол", "қандай", "қаерда", "қачон", "ёрдам",
