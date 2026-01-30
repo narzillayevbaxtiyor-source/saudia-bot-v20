@@ -4,6 +4,7 @@ import logging
 from typing import Dict, List, Optional, Tuple
 
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -167,7 +168,6 @@ def build_topic_link(update: Update, topic_id: int) -> str:
     return f"https://t.me/c/{internal}/{topic_id}"
 
 def build_redirect_text(topic_name: str, link: str) -> str:
-    # Markdown yo‘q! Shuning uchun ** ishlatmaymiz
     return (
         "Iltimos, bu masalani 👇\n\n"
         f"{topic_name}\n\n"
@@ -196,12 +196,17 @@ async def topics_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
-    if not msg or not getattr(msg, "text", None):
+    if not msg:
         return
     if not allowed_chat(update):
         return
 
-    target_topic_id = detect_topic_id_if_any(msg.text)
+    # TEXT yoki CAPTION bo'lsa ishlaydi
+    content = (getattr(msg, "text", None) or getattr(msg, "caption", None) or "").strip()
+    if not content:
+        return
+
+    target_topic_id = detect_topic_id_if_any(content)
     if target_topic_id is None:
         return  # JIM
 
@@ -209,7 +214,7 @@ async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if current_tid == target_topic_id:
         return  # to‘g‘ri topic -> JIM
 
-    # 1) Copy (xato bo‘lsa ham reply yuboramiz)
+    # 1) Copy
     copied_ok = False
     try:
         await context.bot.copy_message(
@@ -219,10 +224,13 @@ async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message_thread_id=target_topic_id,
         )
         copied_ok = True
+    except BadRequest as e:
+        # Eng ko‘p uchraydigani: Message thread not found
+        log.warning("copy_message BadRequest: %s", e)
     except Exception:
         log.exception("copy_message error")
 
-    # 2) Reply + link (doim ishlaydi, parse_mode yo‘q)
+    # 2) Reply + link
     topic_name = ID_TO_NAME.get(target_topic_id, "kerakli bo‘lim")
     link = build_topic_link(update, target_topic_id)
     reply_text = build_redirect_text(topic_name, link)
@@ -236,11 +244,15 @@ async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start_cmd))
-    app.add_handler(CommandHandler("topics", topics_cmd))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, router))
 
-    log.info("✅ Bot start (faqat bitta guruh, faqat keyword bo'lsa; noto‘g‘ri bo‘limda reply).")
+    # /start -> /start1
+    app.add_handler(CommandHandler("start1", start_cmd))
+    app.add_handler(CommandHandler("topics", topics_cmd))
+
+    # Oldin filters.TEXT edi; caption ham ishlashi uchun filters.ALL qildik
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, router))
+
+    log.info("✅ Bot start (/start1). Bitta guruh; keyword bo'lsa redirect qiladi; aks holda jim.")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
